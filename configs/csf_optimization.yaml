@@ -1,0 +1,13 @@
+optimization:
+  memory_optimized: false
+  deterministic_soa: false
+  gpu_enabled: false
+
+gpu:
+  device_id: 0
+  simulation: true
+  classification: true
+  rasterization: false
+
+validation:
+  strict_prerequisites: true
