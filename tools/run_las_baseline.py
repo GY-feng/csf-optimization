@@ -14,7 +14,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 import laspy
 import numpy as np
@@ -92,6 +92,16 @@ DEFAULT_OPTIMIZATION_CONFIG: Dict[str, Dict[str, Any]] = {
     },
 }
 
+CUDA_REBUILD_HINT = (
+    "GPU mode needs a CUDA-built _CSF extension. Rebuild in WSL with: "
+    "CSF_CUDA_ARCH=sm_89 CSF_ENABLE_CUDA=1 pip install -e . --no-build-isolation --force-reinstall"
+)
+
+CPU_ONLY_CUDA_ERROR_MARKERS = (
+    b"gpu_enabled requires building with CSF_ENABLE_CUDA=1",
+    b"gpu_enabled requires a CUDA build",
+)
+
 
 def ms_since(start: float) -> float:
     return (time.perf_counter() - start) * 1000.0
@@ -162,6 +172,38 @@ def load_optimization_config(path: Path) -> Dict[str, Dict[str, Any]]:
             raise ValueError("optimization config error: gpu module flags require gpu_enabled=true")
 
     return config
+
+
+def get_csf_extension_path() -> Optional[Path]:
+    extension = getattr(CSF, "_CSF", None)
+    filename = getattr(extension, "__file__", None)
+    if not filename:
+        return None
+    return Path(filename)
+
+
+def installed_extension_is_known_cpu_only() -> bool:
+    extension_path = get_csf_extension_path()
+    if extension_path is None or not extension_path.is_file():
+        return False
+    try:
+        binary = extension_path.read_bytes()
+    except OSError:
+        return False
+    return any(marker in binary for marker in CPU_ONLY_CUDA_ERROR_MARKERS)
+
+
+def preflight_optimization_runtime(config: Dict[str, Dict[str, Any]]) -> None:
+    if not bool(config["optimization"].get("gpu_enabled", False)):
+        return
+
+    if installed_extension_is_known_cpu_only():
+        extension_path = get_csf_extension_path()
+        raise RuntimeError(
+            "optimization config error: gpu_enabled=true, but the installed CSF extension is CPU-only.\n"
+            f"Current extension: {extension_path}\n"
+            f"{CUDA_REBUILD_HINT}"
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -492,6 +534,7 @@ def main() -> int:
     if args.optimization_config is not None:
         args.optimization_config = args.optimization_config.resolve()
         optimization_config = load_optimization_config(args.optimization_config)
+        preflight_optimization_runtime(optimization_config)
 
     data_dir = args.data_dir.resolve()
     output_base = args.output_dir.resolve()

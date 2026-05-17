@@ -15,8 +15,6 @@ private:
     std::vector<int> neighbor_indices;
 
     std::vector<int> neighbor_write_offsets;
-    std::vector<double> pos_y_snapshot;
-    std::vector<double> delta_y;
 
     void countConstraint(int p1, int p2);
     void writeConstraint(int p1, int p2);

@@ -698,3 +698,186 @@ CSF_ENABLE_CUDA=1 pip install -e . --no-build-isolation --force-reinstall
   - percentage-based bottleneck analysis。
   - A/B 实验中“总时间下降”和“局部 kernel 下降”的区别。
   - GPU 优化中计算加速被数据传输抵消的常见问题。
+---
+
+## 实验 10：验证配置文件入口与本地 YAML 文件缺失问题
+
+- 日期：2026-05-17
+- 背景：
+  - 用户在 WSL 中已经成功导入当前包，`import CSF` 正常。
+  - 随后使用 `--optimization-config configs/verify_memory.local.yaml` 运行时出现 `FileNotFoundError`。
+
+- 报错原因：
+  - `configs/verify_memory.local.yaml` 是之前建议用于临时验证 memory-only 的本地配置文件。
+  - 该文件不是仓库默认文件，也被 `.gitignore` 的 `configs/*.local.yaml` 规则忽略。
+  - 因此如果没有手动创建，命令会在读取 YAML 阶段直接失败，程序还没有进入 CSF 算法流程。
+
+- 用户采用的解决方式：
+  - 改用仓库已有配置：
+
+```bash
+--optimization-config configs/csf_optimization.yaml
+```
+
+  - 用户反馈已经成功开跑。
+
+- 需要注意：
+  - `configs/csf_optimization.yaml` 的实际实验语义取决于文件里的开关。
+  - 如果 `memory_optimized=false`、`deterministic_soa=false`、`gpu_enabled=false`，这是通过 YAML 入口跑 legacy baseline。
+  - 如果 `memory_optimized=true` 且其他阶段关闭，这是 Stage 1 memory-only 验证。
+  - `gpu_enabled=false` 时，`gpu.simulation`、`gpu.classification`、`gpu.rasterization` 必须保持 `false`，否则严格依赖检查会直接报错。
+
+- 当前后续动作：
+  - 等待用户贴出本轮 `summary.md` 或 `profile.md`。
+  - 接下来应对比：
+    - `backend`
+    - `memory_optimized`
+    - `ground_count/non_ground_count`
+    - `cloth_init_ms`
+    - `rasterization_ms`
+    - `simulation_ms`
+    - `constraint_ms`
+    - `total_wall_ms`
+
+- 可学习技术点：
+  - 配置文件路径错误和算法运行错误要区分。
+  - `.local.yaml` 适合本地实验，但不会随 GitHub 同步。
+  - 可复现实验应该优先使用仓库内固定配置，临时实验再使用 local 配置。
+
+---
+
+## 实验 11：GPU 配置开启但扩展仍是 CPU-only 构建
+
+- 日期：2026-05-17
+- 背景：
+  - 用户创建了 `configs/verify_gpu_sim.local.yaml`，其中：
+    - `memory_optimized=true`
+    - `deterministic_soa=true`
+    - `gpu_enabled=true`
+    - `gpu.simulation=true`
+    - `gpu.classification=false`
+    - `gpu.rasterization=false`
+  - 运行参数使用 `cloth_resolution=0.3`、`rigidness=1`、`iterations=500`。
+
+- 报错：
+
+```text
+RuntimeError: gpu_enabled requires building with CSF_ENABLE_CUDA=1
+```
+
+- 原因：
+  - YAML 已经成功打开 GPU 路径。
+  - 但是当前 WSL 环境里 `import CSF` 加载到的 `_CSF.so` 仍然是普通 CPU 构建。
+  - `gpu_enabled=true` 不是运行时动态切换 CUDA；它要求安装阶段已经用 `CSF_ENABLE_CUDA=1` 编译，把 CUDA 源文件和 `CSF_ENABLE_CUDA` 宏编进扩展。
+
+- 本次修复：
+  - C++ 报错信息改为直接给出 CUDA 重新安装命令。
+  - `tools/run_las_baseline.py` 增加 GPU 预检查：如果当前 `_CSF` 明显是 CPU-only 构建，会在读大 LAS 文件之前报错。
+  - `tools/run_optimization_sweep.py` 增加同样的 GPU 预检查：overnight sweep 中 GPU 实验会快速记录错误并跳过，不再先读完整点云。
+  - `setup.py` 在找不到 `nvcc` 时提示需要在 WSL 安装 CUDA Toolkit，避免把 `nvidia-smi` 可用误认为 CUDA 编译器可用。
+
+- 正确修复命令：
+
+```bash
+cd ~/projects/csf-optimization
+conda activate csf-baseline
+
+rm -rf build *.egg-info python/CSF/*.egg-info
+
+which nvcc
+nvcc --version
+nvidia-smi
+
+CSF_CUDA_ARCH=sm_89 CSF_ENABLE_CUDA=1 \
+  pip install -e . --no-build-isolation --force-reinstall -v
+```
+
+- 如果 `which nvcc` 没有输出：
+  - 说明 WSL 里只有 NVIDIA driver/runtime，不一定有 CUDA Toolkit。
+  - 需要先安装 CUDA Toolkit，或者设置 `CUDA_HOME` 指向含 `bin/nvcc` 的目录。
+
+- 可学习技术点：
+  - Python 包里的 C++/CUDA 扩展是安装时编译产物，不是每次运行自动编译。
+  - `nvidia-smi` 只能说明驱动和 GPU 可见，不等价于 `nvcc` 可用。
+  - 编译期宏 `CSF_ENABLE_CUDA` 决定 CUDA 代码是否被编译进 `_CSF.so`。
+  - GPU 实验前要区分三层问题：YAML 配置、Python import 到的扩展版本、CUDA Toolkit/driver 环境。
+
+---
+
+## 实验 12：SoA 质量错误定位与 CPU SoA correctness-first 修复
+
+- 日期：2026-05-17
+- 背景：
+  - 用户对比可视化结果后发现：memory-only 前后数据质量不变，但开启 SoA 后，大量植被/非地面点被错误分到 ground。
+  - 这不是小幅数值误差，而是结果语义错误。
+  - 因为 GPU simulation 复用了 SoA 的布料状态，所以 SoA 错误会直接传递到 GPU 结果。
+
+- 错误现象：
+  - legacy/memory-only 的 ground 点较稀疏，符合地面提取预期。
+  - SoA 后 ground 点变成大片连续植被/冠层，明显误判。
+  - 之前 sweep 里也能看到 ground 数量从 legacy 到 SoA 后显著变化，例如 `1.las` 从约 1469 万 ground 变成约 3477 万 ground。
+
+- 根因：
+  - 原 legacy 约束求解是原地 Gauss-Seidel 风格：
+
+```text
+for p1 in particles:
+  for p2 in p1.neighbors:
+    立即修改 p1
+    同时反向修改 p2
+```
+
+  - 第一版 SoA 为了确定性并行，把它改成了 Jacobi/gather 风格：
+
+```text
+先复制 snapshot
+每个 p1 独立累计 delta
+最后一次性写回 p1
+```
+
+  - 这不是等价优化，而是换了物理求解器语义。
+  - 由于布料最终形状变了，classification 自然会把大量非地面点误判成地面点。
+
+- 本次修复：
+  - 只修 CPU SoA，不修 GPU。
+  - `ClothSoA::timeStep()` 的 constraint 阶段改回 legacy 等价的原地顺序更新。
+  - 保持同样的粒子顺序、邻居顺序、`singleMove1/doubleMove1` 系数和 movable 处理。
+  - 删除 CPU SoA 中不再使用的 `pos_y_snapshot` 和 `delta_y` 成员，避免误以为仍在使用 Jacobi 求解。
+  - 这一步牺牲 constraint 阶段并行性，目标是先恢复正确性。
+  - `tools/run_optimization_sweep.py` 默认关闭 GPU 两组实验，避免继续产出已知不可信的 GPU 质量结果。
+  - `configs/csf_optimization.yaml` 注释已更新，说明当前 CPU SoA 是 correctness-first 路径，GPU 暂不建议用于结果产出。
+
+- 当前 GPU 状态：
+  - GPU simulation 仍然是旧的 Jacobi/gather 版本。
+  - 在 GPU 版本单独修复前，不应该使用 `gpu_enabled=true` 产出质量结果。
+
+- 当前建议配置：
+
+```yaml
+optimization:
+  memory_optimized: true
+  deterministic_soa: true
+  gpu_enabled: false
+
+gpu:
+  simulation: false
+  classification: false
+  rasterization: false
+```
+
+- 验证重点：
+  - 先用同一个 LAS、同一组参数分别跑：
+    - memory-only legacy
+    - fixed CPU SoA
+  - 对比：
+    - `ground_count/non_ground_count`
+    - CloudCompare 可视化 ground.las
+    - `constraint_ms`
+    - `total_wall_ms`
+  - 如果 CPU SoA 仍有明显质量差异，下一步继续查 SoA rasterization 的 hole filling 是否与 legacy 完全一致。
+
+- 可学习技术点：
+  - 数据结构 SoA 化不能顺手改变数值算法语义。
+  - Gauss-Seidel 与 Jacobi 在约束求解中会产生完全不同的收敛轨迹。
+  - 高性能优化必须先建立 correctness gate；否则速度提升没有意义。
+  - GPU 迁移应建立在 CPU 参考实现正确之后。

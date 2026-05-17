@@ -23,7 +23,10 @@ def find_cuda_home() -> Path:
     if nvcc:
         return Path(nvcc).resolve().parent.parent
 
-    raise RuntimeError("CSF_ENABLE_CUDA=1 was set, but nvcc was not found. Set CUDA_HOME or add nvcc to PATH.")
+    raise RuntimeError(
+        "CSF_ENABLE_CUDA=1 was set, but nvcc was not found. "
+        "Install the CUDA Toolkit in WSL, or set CUDA_HOME / add nvcc to PATH."
+    )
 
 
 class CudaBuildExt(build_ext):

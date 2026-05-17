@@ -1,0 +1,78 @@
+{
+  "data_dir": "/home/zjf/projects/csf-optimization/data",
+  "output_root": "/home/zjf/projects/csf-optimization/output/sweep_20260517_0334",
+  "input_patterns": [
+    "*.las"
+  ],
+  "csf_params": {
+    "bSloopSmooth": false,
+    "time_step": 0.5,
+    "class_threshold": 0.05,
+    "cloth_resolution": 0.1,
+    "rigidness": 1,
+    "iterations": 500
+  },
+  "write_las_outputs": false,
+  "experiments": [
+    {
+      "name": "00_legacy_baseline",
+      "description": "All optimization switches off; legacy baseline.",
+      "enabled": true,
+      "memory_optimized": false,
+      "deterministic_soa": false,
+      "gpu_enabled": false,
+      "gpu_simulation": false,
+      "gpu_classification": false,
+      "gpu_rasterization": false,
+      "gpu_device_id": 0
+    },
+    {
+      "name": "01_memory_only",
+      "description": "Stage 1 memory optimization only; still legacy backend.",
+      "enabled": true,
+      "memory_optimized": true,
+      "deterministic_soa": false,
+      "gpu_enabled": false,
+      "gpu_simulation": false,
+      "gpu_classification": false,
+      "gpu_rasterization": false,
+      "gpu_device_id": 0
+    },
+    {
+      "name": "02_deterministic_soa",
+      "description": "Stage 2 deterministic SoA backend.",
+      "enabled": true,
+      "memory_optimized": true,
+      "deterministic_soa": true,
+      "gpu_enabled": false,
+      "gpu_simulation": false,
+      "gpu_classification": false,
+      "gpu_rasterization": false,
+      "gpu_device_id": 0
+    },
+    {
+      "name": "03_gpu_simulation",
+      "description": "Stage 3 GPU simulation, CPU classification.",
+      "enabled": true,
+      "memory_optimized": true,
+      "deterministic_soa": true,
+      "gpu_enabled": true,
+      "gpu_simulation": true,
+      "gpu_classification": false,
+      "gpu_rasterization": false,
+      "gpu_device_id": 0
+    },
+    {
+      "name": "04_gpu_simulation_classification",
+      "description": "Stage 3 GPU simulation and GPU classification.",
+      "enabled": true,
+      "memory_optimized": true,
+      "deterministic_soa": true,
+      "gpu_enabled": true,
+      "gpu_simulation": true,
+      "gpu_classification": true,
+      "gpu_rasterization": false,
+      "gpu_device_id": 0
+    }
+  ]
+}

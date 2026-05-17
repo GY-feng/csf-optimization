@@ -64,6 +64,14 @@ std::string jsonEscape(const std::string& value)
     }
     return out.str();
 }
+
+#ifndef CSF_ENABLE_CUDA
+const char* cudaBuildRequiredMessage()
+{
+    return "gpu_enabled requires a CUDA build. Reinstall in WSL with: "
+           "CSF_CUDA_ARCH=sm_89 CSF_ENABLE_CUDA=1 pip install -e . --no-build-isolation --force-reinstall";
+}
+#endif
 }
 
 CSF::ProfileStats::ProfileStats()
@@ -197,7 +205,7 @@ void CSF::validateOptimizationConfig(bool exportCloth) const
 
     if (params.opt_gpu_enabled) {
 #ifndef CSF_ENABLE_CUDA
-        throw std::runtime_error("gpu_enabled requires building with CSF_ENABLE_CUDA=1");
+        throw std::runtime_error(cudaBuildRequiredMessage());
 #endif
     }
 }
@@ -633,7 +641,7 @@ void CSF::do_filtering_gpu(std::vector<int> &groundIndexes,
     initializeProfile("gpu");
 
 #ifndef CSF_ENABLE_CUDA
-    last_profile.backend_error = "gpu_enabled requires building with CSF_ENABLE_CUDA=1";
+    last_profile.backend_error = cudaBuildRequiredMessage();
     updateLastProfileJson();
     throw std::runtime_error(last_profile.backend_error);
 #else

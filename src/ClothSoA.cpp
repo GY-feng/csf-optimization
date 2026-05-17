@@ -36,8 +36,6 @@ ClothSoA::ClothSoA(const Vec3& _origin_pos,
     nearest_height.assign(particleCount, MIN_INF);
     tmp_dist.assign(particleCount, MAX_INF);
     nearest_idx.assign(particleCount, 0);
-    pos_y_snapshot.assign(particleCount, origin_pos.f[1]);
-    delta_y.assign(particleCount, 0.0);
 
     buildNeighbors();
 }
@@ -208,46 +206,30 @@ double ClothSoA::timeStep(ClothStepProfile *profile) {
     }
 
     stageStart = Clock::now();
-#ifdef CSF_USE_OPENMP
-#pragma omp parallel for
-#endif
-    for (int i = 0; i < particleCount; i++) {
-        pos_y_snapshot[i] = pos_y[i];
-        delta_y[i] = 0.0;
-    }
+    double doubleMove = constraint_iterations > 14 ? 0.5 : doubleMove1[constraint_iterations];
+    double singleMove = constraint_iterations > 14 ? 1.0 : singleMove1[constraint_iterations];
 
-#ifdef CSF_USE_OPENMP
-#pragma omp parallel for
-#endif
+    // Match legacy Particle::satisfyConstraintSelf semantics exactly:
+    // in-place Gauss-Seidel style updates, same particle order, same neighbor order.
+    // This is intentionally serial because parallelizing this loop changes the solver.
     for (int p1 = 0; p1 < particleCount; p1++) {
-        if (!movable[p1]) {
-            continue;
-        }
-
-        double localDelta = 0.0;
         const int *begin = neighborsBegin(p1);
         const int *end = neighborsEnd(p1);
         for (const int *it = begin; it != end; ++it) {
             int p2 = *it;
-            double correction = pos_y_snapshot[p2] - pos_y_snapshot[p1];
+            double correction = pos_y[p2] - pos_y[p1];
 
-            if (movable[p2]) {
-                double correctionHalf = correction * (constraint_iterations > 14 ? 0.5 : doubleMove1[constraint_iterations]);
-                localDelta += correctionHalf;
+            if (movable[p1] && movable[p2]) {
+                double correctionHalf = correction * doubleMove;
+                pos_y[p1] += correctionHalf;
+                pos_y[p2] -= correctionHalf;
+            } else if (movable[p1] && !movable[p2]) {
+                pos_y[p1] += correction * singleMove;
+            } else if (!movable[p1] && movable[p2]) {
+                pos_y[p2] -= correction * singleMove;
             } else {
-                double correctionHalf = correction * (constraint_iterations > 14 ? 1 : singleMove1[constraint_iterations]);
-                localDelta += correctionHalf;
+                // Both particles are fixed by terrain collision.
             }
-        }
-        delta_y[p1] = localDelta;
-    }
-
-#ifdef CSF_USE_OPENMP
-#pragma omp parallel for
-#endif
-    for (int i = 0; i < particleCount; i++) {
-        if (movable[i]) {
-            pos_y[i] += delta_y[i];
         }
     }
     if (profile) {

@@ -1,13 +1,13 @@
 optimization:
-  memory_optimized: false
-  deterministic_soa: false
-  gpu_enabled: false
+  memory_optimized: true        # 开启内存优化：跳过未使用的点索引缓存，并预留邻接表容量；不改变 legacy 算法语义
+  deterministic_soa: false      # 开启 CPU SoA 后端：要求 memory_optimized=true；当前为 correctness-first 的 legacy 等价顺序约束求解
+  gpu_enabled: false            # 开启 GPU 总开关：要求 deterministic_soa=true；当前 GPU simulation 仍待质量修复，暂不建议用于结果产出
 
 gpu:
-  device_id: 0
-  simulation: true
-  classification: true
-  rasterization: false
+  device_id: 0                  # CUDA 设备编号；单卡通常是 0，多卡时用 nvidia-smi 查看编号
+  simulation: false             # 是否把布料模拟迁移到 GPU；只有 gpu_enabled=true 时允许开启
+  classification: false         # 是否把地面/非地面分类计算迁移到 GPU；只有 gpu_enabled=true 时允许开启
+  rasterization: false          # 是否把光栅化迁移到 GPU；第一版暂不支持，开启会直接报错
 
 validation:
-  strict_prerequisites: true
+  strict_prerequisites: true    # 严格检查阶段依赖；后置阶段开启但前置阶段未开启时直接报错，不自动兜底
